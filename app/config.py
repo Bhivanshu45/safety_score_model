@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     
     # Server Settings
     host: str = "0.0.0.0"
-    port: int = 8000
-    reload: bool = True
+    port: int = int(os.getenv("PORT", "8000"))
+    reload: bool = os.getenv("ENVIRONMENT", "development") == "development"
     
     class Config:
         env_file = ".env"

@@ -33,6 +33,8 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+quick_test_debug.py
+test_model_direct.py
 
 # OS
 .DS_Store
