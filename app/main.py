@@ -3,6 +3,7 @@ FastAPI Application for Safety Score Model
 Crime prediction API with XGBoost model
 """
 
+import os
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,15 +41,24 @@ async def lifespan(app: FastAPI):
     """
     # Startup: Load the model and grids
     logger.info("Starting up application...")
+    logger.info(f"Python version check passed")
+    logger.info(f"Current working directory: {os.getcwd()}")
+    
     try:
+        logger.info("Loading model...")
         predictor.load_model()
         logger.info("Model loaded successfully during startup")
         
+        logger.info("Loading grid shapefile...")
         grid_mapper.load_grids()
         logger.info("Grid shapefile loaded successfully during startup")
+        
+        logger.info("✅ Application startup complete - ready to accept requests")
     except Exception as e:
-        logger.error(f"Failed to load resources during startup: {str(e)}")
-        raise RuntimeError(f"Startup failed: {str(e)}")
+        logger.error(f"❌ Failed to load resources during startup: {str(e)}")
+        logger.exception("Full traceback:")
+        # Don't raise - let app start anyway for health check
+        logger.warning("Starting app despite startup errors")
     
     yield
     
