@@ -1,37 +1,30 @@
 # ============================================
-# FastAPI Backend - Production Dependencies
-# Python 3.11 compatible - PRE-BUILT WHEELS ONLY
+# FastAPI Backend - MINIMAL Production Setup
+# NO COMPILATION - Binary wheels only
 # ============================================
 
 # FastAPI Web Framework
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
 
 # Data Validation
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
-# ML Model - STABLE versions with binary wheels
+# ML Model - XGBoost only (no sklearn needed for inference)
 xgboost==2.0.2
-scikit-learn==1.3.2
 joblib==1.3.2
 
-# Data Processing - STABLE
+# Data Processing - MINIMAL
 pandas==2.1.3
 numpy==1.26.2
 
-# Geospatial - STABLE
+# Geospatial - MINIMAL (only what we use)
 geopandas==0.14.1
 shapely==2.0.2
-pyproj==3.6.1
-fiona==1.9.5
-
-# ML Dependencies
-scipy==1.11.4
 
 # Utilities
 python-dateutil==2.8.2
-certifi==2023.11.17
 
-# For testing
+# HTTP client
 requests==2.31.0
