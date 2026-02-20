@@ -17,7 +17,9 @@ git push origin main
 4. Configure:
    - **Name**: `safety-score-api` (or your choice)
    - **Environment**: `Python 3`
-   - **Build Command**: `pip install -r requirements.txt`
+   - **Region**: Choose closest to you
+   - **Branch**: `main`
+   - **Build Command**: `pip install --upgrade pip && pip install -r requirements.txt`
    - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - **Instance Type**: Free
 
@@ -26,7 +28,10 @@ git push origin main
    - No API keys  
    - Model files included in repo
 
-6. Click **"Create Web Service"**
+6. **Advanced Settings** (Optional but recommended):
+   - **Python Version**: Uses `runtime.txt` (Python 3.11.9) automatically
+
+7. Click **"Create Web Service"**
 
 ### 3. Wait for Deployment
 - First build: ~5-10 minutes
@@ -61,3 +66,20 @@ python run.py
 - First request after sleep takes ~30 seconds
 - Model size: 4.2 MB (within limits)
 - No paid services required
+
+## Troubleshooting
+
+### Build Error: pydantic-core or Rust compilation
+**Fixed**: Updated `requirements.txt` with Render-compatible versions (pydantic 2.9.2)
+
+### Build taking too long
+- First build: 5-10 minutes (installing geopandas dependencies)
+- Subsequent builds: ~2-3 minutes (cached)
+
+### Service not responding
+- Check Render logs for "Application startup complete" message
+- Verify model file loaded successfully
+- Free tier services sleep after inactivity - first request wakes it up (~30s)
+
+### Need help?
+Check Render logs in dashboard for detailed error messages
