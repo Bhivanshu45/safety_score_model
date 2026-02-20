@@ -1,0 +1,36 @@
+# ============================================
+# FastAPI Backend - Production Dependencies
+# ============================================
+
+# FastAPI Web Framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+
+# Data Validation & Settings
+pydantic==2.10.0
+pydantic-settings==2.6.0
+
+# ML Model - Core Libraries
+xgboost==3.2.0
+scikit-learn==1.8.0
+joblib==1.5.3
+
+# Data Processing
+pandas==3.0.1
+numpy==2.4.2
+
+# Geospatial Processing (for lat/long to grid conversion)
+geopandas==1.0.1
+shapely==2.0.6
+
+# ML Dependencies
+scipy==1.17.0
+threadpoolctl==3.6.0
+
+# Utilities
+python-dateutil==2.9.0.post0
+tzdata==2025.3
+certifi==2026.1.4
+
+# For testing API endpoints
+requests==2.32.3
