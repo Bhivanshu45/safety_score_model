@@ -1,6 +1,6 @@
 # ============================================
 # FastAPI Backend - MINIMAL Production Setup
-# NO COMPILATION - Binary wheels only
+# Pure Python - NO system dependencies
 # ============================================
 
 # FastAPI Web Framework
@@ -11,17 +11,17 @@ uvicorn==0.24.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
-# ML Model - XGBoost only (no sklearn needed for inference)
+# ML Model
 xgboost==2.0.2
 joblib==1.3.2
 
-# Data Processing - MINIMAL
+# Data Processing
 pandas==2.1.3
 numpy==1.26.2
 
-# Geospatial - MINIMAL (only what we use)
-geopandas==0.14.1
+# Geospatial - Pure Python, NO GDAL needed
 shapely==2.0.2
+pyshp==2.3.1
 
 # Utilities
 python-dateutil==2.8.2

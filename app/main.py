@@ -297,6 +297,20 @@ async def predict_from_location(request: LocationPredictionRequest):
     - **time_context**: Temporal context information
     """
     try:
+        # Check if model is loaded
+        if not predictor.is_loaded:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Model not loaded. Please try again later."
+            )
+        
+        # Check if grids are loaded
+        if not grid_mapper.is_loaded:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Grid mapper not loaded. Location service unavailable. Please try again later."
+            )
+        
         # Parse datetime string
         try:
             dt = parse_datetime_string(request.datetime)
@@ -310,14 +324,34 @@ async def predict_from_location(request: LocationPredictionRequest):
         if not grid_mapper.validate_coordinates(request.latitude, request.longitude):
             grid_info = grid_mapper.get_grid_info()
             bounds = grid_info.get('bounds', {})
+            
+            # Build bounds message with proper null handling
+            if bounds:
+                min_lat = bounds.get('min_latitude', 'N/A')
+                max_lat = bounds.get('max_latitude', 'N/A')
+                min_lon = bounds.get('min_longitude', 'N/A')
+                max_lon = bounds.get('max_longitude', 'N/A')
+                
+                # Format numbers if they exist
+                if isinstance(min_lat, (int, float)):
+                    min_lat = f"{min_lat:.4f}"
+                if isinstance(max_lat, (int, float)):
+                    max_lat = f"{max_lat:.4f}"
+                if isinstance(min_lon, (int, float)):
+                    min_lon = f"{min_lon:.4f}"
+                if isinstance(max_lon, (int, float)):
+                    max_lon = f"{max_lon:.4f}"
+                    
+                bounds_text = f"Lat [{min_lat}, {max_lat}], Lon [{min_lon}, {max_lon}]"
+            else:
+                bounds_text = "Service area bounds unavailable"
+            
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"Coordinates ({request.latitude}, {request.longitude}) "
                     f"are outside the service area. "
-                    f"Service bounds: "
-                    f"Lat [{bounds.get('min_latitude'):.4f}, {bounds.get('max_latitude'):.4f}], "
-                    f"Lon [{bounds.get('min_longitude'):.4f}, {bounds.get('max_longitude'):.4f}]"
+                    f"Service bounds: {bounds_text}"
                 )
             )
         

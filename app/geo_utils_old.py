@@ -1,10 +1,11 @@
 """
 Geospatial Utilities
-Convert latitude/longitude to grid ID using shapefile (Pure Python, no GDAL)
+Convert latitude/longitude to grid ID using shapefile
 """
 
-import shapefile
-from shapely.geometry import Point, shape
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Point
 from pathlib import Path
 import logging
 from typing import Optional
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 class GridMapper:
     """
     Maps latitude/longitude coordinates to grid IDs
-    Uses pure Python shapefile reading (no GDAL/Fiona required)
+    Uses shapefile for spatial join
     """
     
     def __init__(self, shapefile_path: str = None):
@@ -25,49 +26,25 @@ class GridMapper:
             base_path = Path(__file__).parent.parent
             shapefile_path = base_path / "models" / "grids" / "city_grids_500m.shp"
         
-        self.shapefile_path = str(shapefile_path)
-        self.shapes_data = []  # List of (geometry, id) tuples
+        self.shapefile_path = shapefile_path
+        self.grids_gdf = None
         self.is_loaded = False
-        self.bounds = None
         
     def load_grids(self) -> None:
-        """Load the grid shapefile using pure Python"""
+        """Load the grid shapefile"""
         try:
             logger.info(f"Loading grid shapefile from: {self.shapefile_path}")
-            
-            # Read shapefile using pyshp (pure Python)
-            sf = shapefile.Reader(self.shapefile_path)
-            
-            logger.info(f"Shapefile loaded - {len(sf.shapes())} shapes found")
-            
-            # Extract shapes and IDs
-            self.shapes_data = []
-            for sr in sf.shapeRecords():
-                geom = shape(sr.shape.__geo_interface__)
-                grid_id = sr.record[0]  # First field is 'id'
-                self.shapes_data.append((geom, grid_id))
-            
-            # Calculate bounds
-            all_bounds = [geom.bounds for geom, _ in self.shapes_data]
-            if all_bounds:
-                min_x = min(b[0] for b in all_bounds)
-                min_y = min(b[1] for b in all_bounds)
-                max_x = max(b[2] for b in all_bounds)
-                max_y = max(b[3] for b in all_bounds)
-                self.bounds = (min_x, min_y, max_x, max_y)
-            
+            self.grids_gdf = gpd.read_file(self.shapefile_path)
             self.is_loaded = True
-            logger.info(f"Grid shapefile loaded successfully. Total grids: {len(self.shapes_data)}")
-            logger.info(f"Bounds: Lon [{self.bounds[0]:.4f}, {self.bounds[2]:.4f}], "
-                       f"Lat [{self.bounds[1]:.4f}, {self.bounds[3]:.4f}]")
-            
+            logger.info(f"Grid shapefile loaded successfully. Total grids: {len(self.grids_gdf)}")
+            logger.info(f"CRS: {self.grids_gdf.crs}")
         except Exception as e:
             logger.error(f"Failed to load grid shapefile: {str(e)}")
             raise Exception(f"Grid shapefile loading failed: {str(e)}")
     
     def get_grid_id(self, latitude: float, longitude: float) -> Optional[int]:
         """
-        Get grid ID for given lat/long coordinates (Pure Python)
+        Get grid ID for given lat/long coordinates
         
         Args:
             latitude: Latitude coordinate
@@ -80,12 +57,27 @@ class GridMapper:
             raise RuntimeError("Grids not loaded. Call load_grids() first.")
         
         try:
-            # Create point geometry (Point takes x, y = lon, lat)
-            point = Point(longitude, latitude)
+            # Create point geometry
+            point = Point(longitude, latitude)  # Note: Point takes (x, y) = (lon, lat)
             
-            # Find which grid contains this point
-            for geom, grid_id in self.shapes_data:
-                if geom.contains(point):
+            # Create GeoDataFrame with the point
+            point_gdf = gpd.GeoDataFrame(
+                {'geometry': [point]}, 
+                crs=self.grids_gdf.crs
+            )
+            
+            # Perform spatial join to find which grid contains the point
+            joined = gpd.sjoin(
+                point_gdf, 
+                self.grids_gdf, 
+                how='left', 
+                predicate='within'
+            )
+            
+            # Get grid ID
+            if not joined.empty and 'id' in joined.columns:
+                grid_id = joined.iloc[0]['id']
+                if pd.notna(grid_id):
                     logger.debug(f"Point ({latitude}, {longitude}) -> Grid ID: {grid_id}")
                     return int(grid_id)
             
@@ -107,33 +99,40 @@ class GridMapper:
         Returns:
             True if within bounds, False otherwise
         """
-        if not self.is_loaded or not self.bounds:
+        if not self.is_loaded:
+            logger.error("Cannot validate coordinates: Grids not loaded. Check if shapefile exists and is readable.")
             return False
         
-        min_x, min_y, max_x, max_y = self.bounds
-        
-        within_lon = min_x <= longitude <= max_x
-        within_lat = min_y <= latitude <= max_y
-        
-        return within_lon and within_lat
+        try:
+            bounds = self.grids_gdf.total_bounds  # [minx, miny, maxx, maxy]
+            
+            within_lon = bounds[0] <= longitude <= bounds[2]
+            within_lat = bounds[1] <= latitude <= bounds[3]
+            
+            return within_lon and within_lat
+        except Exception as e:
+            logger.error(f"Error validating coordinates: {str(e)}")
+            return False
     
     def get_grid_info(self) -> dict:
         """Get information about loaded grids"""
         if not self.is_loaded:
             return {"status": "not_loaded"}
         
+        bounds = self.grids_gdf.total_bounds
+        
         return {
             "status": "loaded",
-            "total_grids": len(self.shapes_data),
+            "total_grids": len(self.grids_gdf),
+            "crs": str(self.grids_gdf.crs),
             "bounds": {
-                "min_longitude": float(self.bounds[0]),
-                "min_latitude": float(self.bounds[1]),
-                "max_longitude": float(self.bounds[2]),
-                "max_latitude": float(self.bounds[3])
+                "min_longitude": float(bounds[0]),
+                "min_latitude": float(bounds[1]),
+                "max_longitude": float(bounds[2]),
+                "max_latitude": float(bounds[3])
             },
             "grid_id_column": "id"
         }
-
 
 # Create global grid mapper instance
 grid_mapper = GridMapper()
