@@ -19,7 +19,7 @@ git push origin main
    - **Environment**: `Python 3`
    - **Region**: Choose closest to you
    - **Branch**: `main`
-   - **Build Command**: `pip install --upgrade pip && pip install -r requirements.txt`
+   - **Build Command**: `pip install --upgrade pip && pip install --only-binary=:all: -r requirements.txt || pip install -r requirements.txt`
    - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - **Instance Type**: Free
 
