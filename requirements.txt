@@ -20,7 +20,7 @@ pandas>=2.2.0
 numpy>=1.26.2
 
 # Geospatial - Pure Python, NO GDAL needed
-shapely==2.0.2
+shapely>=2.0.4
 pyshp==2.3.1
 
 # Utilities
