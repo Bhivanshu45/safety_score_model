@@ -133,6 +133,39 @@ class GridMapper:
             },
             "grid_id_column": "id"
         }
+    
+    def get_all_grids_geometries(self) -> list:
+        """
+        Get all grid geometries in GeoJSON format
+        
+        Returns:
+            List of tuples (grid_id, geometry_dict) where geometry is GeoJSON polygon
+        """
+        if not self.is_loaded:
+            raise RuntimeError("Grids not loaded. Call load_grids() first.")
+        
+        grids_geojson = []
+        
+        for geom, grid_id in self.shapes_data:
+            # Convert shapely geometry to GeoJSON-like dict
+            # Use __geo_interface__ for GeoJSON representation
+            geojson_geom = {
+                "type": geom.geom_type,
+                "coordinates": list(geom.exterior.coords) if geom.geom_type == "Polygon" else None
+            }
+            
+            # Convert coordinates from (lon, lat) tuples to [[lon, lat], ...] lists
+            if geojson_geom["type"] == "Polygon":
+                geojson_geom["coordinates"] = [[[lon, lat] for lon, lat in geojson_geom["coordinates"]]]
+            
+            grids_geojson.append((int(grid_id), geojson_geom))
+        
+        logger.info(f"Generated GeoJSON geometries for {len(grids_geojson)} grids")
+        return grids_geojson
+
+
+# Create global grid mapper instance
+grid_mapper = GridMapper()
 
 
 # Create global grid mapper instance

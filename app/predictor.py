@@ -304,6 +304,299 @@ class ModelPredictor:
         logger.info(f"Prediction result: prob={result.unsafe_probability}, pred={result.prediction}")
         
         return result
+    
+    def predict_route(
+        self,
+        coordinates: List[tuple],  # List of (lat, lng) tuples
+        dt: 'datetime',
+        grid_mapper: 'GridMapper'
+    ) -> dict:
+        """
+        Predict safety score for a complete route (path from source to destination)
+        
+        Pipeline:
+        1. Convert all (lat, lng) → grid IDs
+        2. Extract temporal features (same for all points)
+        3. Prepare lag features
+        4. Batch predict all locations
+        5. Aggregate using average and worst-case methods
+        6. Return structured response
+        
+        Args:
+            coordinates: List of (latitude, longitude) tuples
+            dt: datetime object for the route
+            grid_mapper: GridMapper instance
+            
+        Returns:
+            Dictionary with route safety metrics
+            
+        Raises:
+            ValueError: If any coordinate doesn't map to a grid
+            RuntimeError: If model not loaded
+        """
+        from app.datetime_utils import extract_temporal_features
+        
+        if not self.is_loaded or self.model is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+        
+        if len(coordinates) < 2:
+            raise ValueError("Route must have at least 2 coordinates")
+        
+        logger.info(f"Starting route prediction for {len(coordinates)} coordinates")
+        
+        # =====================
+        # STEP 1: Convert coordinates to grid IDs
+        # =====================
+        grid_ids = []
+        for idx, (lat, lng) in enumerate(coordinates):
+            grid_id = grid_mapper.get_grid_id(lat, lng)
+            if grid_id is None:
+                raise ValueError(
+                    f"Coordinate {idx} ({lat}, {lng}) does not fall within any grid"
+                )
+            grid_ids.append(grid_id)
+        
+        logger.info(f"Converted all coordinates to grid IDs: {grid_ids}")
+        
+        # =====================
+        # STEP 2: Extract temporal features (same for all points)
+        # =====================
+        temporal_features = extract_temporal_features(dt)
+        
+        # Adjust year to training range
+        if temporal_features['year'] > 2020:
+            logger.info(f"Year {temporal_features['year']} outside range, using 2020")
+            temporal_features['year'] = 2020
+        elif temporal_features['year'] < 2000:
+            logger.info(f"Year {temporal_features['year']} outside range, using 2000")
+            temporal_features['year'] = 2000
+        
+        logger.info(f"Temporal features: {temporal_features}")
+        
+        # =====================
+        # STEP 3: Prepare lag features (defaults for route prediction)
+        # =====================
+        lag_features = {
+            'lag_1': 1.5,
+            'lag_6': 1.8,
+            'lag_42': 1.6,
+            'rolling_6_mean': 1.7,
+            'rolling_42_mean': 1.8
+        }
+        
+        # =====================
+        # STEP 4: Create prediction requests for all coordinates
+        # =====================
+        prediction_requests = []
+        for grid_id in grid_ids:
+            full_features = {
+                'index_right': grid_id,
+                **temporal_features,
+                **lag_features
+            }
+            pred_request = PredictionRequest(**full_features)
+            prediction_requests.append(pred_request)
+        
+        logger.info(f"Created {len(prediction_requests)} prediction requests")
+        
+        # =====================
+        # STEP 5: Batch predict all locations
+        # =====================
+        predictions = self.predict(prediction_requests)
+        
+        unsafe_probs = [p.unsafe_probability for p in predictions]
+        binary_preds = [p.prediction for p in predictions]
+        
+        logger.info(f"Predictions: {unsafe_probs}")
+        logger.info(f"Binary predictions: {binary_preds}")
+        
+        # =====================
+        # STEP 6: Aggregate results (both average and worst-case)
+        # =====================
+        average_prob = sum(unsafe_probs) / len(unsafe_probs)
+        worst_prob = max(unsafe_probs)
+        unsafe_count = sum(binary_preds)
+        
+        # Use average probability for route_safety_score
+        route_safety_score = average_prob
+        
+        # Map score to safety level
+        if route_safety_score < 0.33:
+            safety_level = "Low Risk"
+        elif route_safety_score < 0.67:
+            safety_level = "Medium Risk"
+        else:
+            safety_level = "High Risk"
+        
+        logger.info(
+            f"Route aggregation: avg={average_prob:.4f}, worst={worst_prob:.4f}, "
+            f"unsafe_count={unsafe_count}/{len(unsafe_probs)}"
+        )
+        
+        # =====================
+        # STEP 7: Return structured response
+        # =====================
+        return {
+            'route_safety_score': round(route_safety_score, 4),
+            'route_safety_level': safety_level,
+            'worst_probability': round(worst_prob, 4),
+            'average_probability': round(average_prob, 4),
+            'segment_count': len(coordinates),
+            'unsafe_segments': unsafe_count
+        }
+    
+    def predict_all_grids(
+        self,
+        grid_mapper: 'GridMapper',
+        dt: 'datetime' = None
+    ) -> dict:
+        """
+        Predict safety score for all grid cells
+        
+        Returns complete heatmap data with geometries and safety scores.
+        
+        Args:
+            grid_mapper: GridMapper instance with loaded grids
+            dt: datetime object (uses current time if None)
+            
+        Returns:
+            Dictionary with timestamp, statistics, and grid data with geometries
+        """
+        from app.datetime_utils import extract_temporal_features
+        from datetime import datetime as dt_class
+        
+        if not self.is_loaded or self.model is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+        
+        if dt is None:
+            dt = dt_class.now()
+        
+        logger.info(f"Starting heatmap prediction for all {len(grid_mapper.shapes_data)} grids")
+        
+        # =====================
+        # STEP 1: Extract temporal features (same for all)
+        # =====================
+        temporal_features = extract_temporal_features(dt)
+        
+        # Adjust year to training range
+        if temporal_features['year'] > 2020:
+            temporal_features['year'] = 2020
+        elif temporal_features['year'] < 2000:
+            temporal_features['year'] = 2000
+        
+        # =====================
+        # STEP 2: Prepare lag features (defaults)
+        # =====================
+        lag_features = {
+            'lag_1': 1.5,
+            'lag_6': 1.8,
+            'lag_42': 1.6,
+            'rolling_6_mean': 1.7,
+            'rolling_42_mean': 1.8
+        }
+        
+        # =====================
+        # STEP 3: Create prediction requests for all grids
+        # =====================
+        grid_ids = []
+        prediction_requests = []
+        
+        for geom, grid_id in grid_mapper.shapes_data:
+            grid_ids.append(int(grid_id))
+            
+            full_features = {
+                'index_right': int(grid_id),
+                **temporal_features,
+                **lag_features
+            }
+            pred_request = PredictionRequest(**full_features)
+            prediction_requests.append(pred_request)
+        
+        logger.info(f"Created {len(prediction_requests)} prediction requests")
+        
+        # =====================
+        # STEP 4: Batch predict all grids
+        # =====================
+        predictions = self.predict(prediction_requests)
+        
+        unsafe_probs = [p.unsafe_probability for p in predictions]
+        binary_preds = [p.prediction for p in predictions]
+        
+        logger.info(f"Batch predictions complete. Probabilities: min={min(unsafe_probs):.4f}, max={max(unsafe_probs):.4f}")
+        
+        # =====================
+        # STEP 5: Get grid geometries
+        # =====================
+        grids_geojson = grid_mapper.get_all_grids_geometries()
+        
+        # =====================
+        # STEP 6: Build grid data with colors and statistics
+        # =====================
+        grid_data_list = []
+        safe_count = 0
+        low_risk_count = 0
+        medium_risk_count = 0
+        high_risk_count = 0
+        avg_unsafe_probability = sum(unsafe_probs) / len(unsafe_probs)
+        
+        for grid_id, geojson_geom, unsafe_prob, binary_pred in zip(
+            grid_ids, [g[1] for g in grids_geojson], unsafe_probs, binary_preds
+        ):
+            # Determine safety level and color (4-tier system)
+            if unsafe_prob == 0.0:
+                safety_level = "Safe"
+                color = "#00ff00"  # Green
+                safe_count += 1
+            elif unsafe_prob <= 0.4:
+                safety_level = "Low Risk"
+                color = "#90EE90"  # Light Green
+                low_risk_count += 1
+            elif unsafe_prob <= 0.7:
+                safety_level = "Medium Risk"
+                color = "#ffff00"  # Yellow
+                medium_risk_count += 1
+            else:
+                safety_level = "High Risk"
+                color = "#ff0000"  # Red
+                high_risk_count += 1
+            
+            grid_data = {
+                "grid_id": int(grid_id),
+                "unsafe_probability": round(float(unsafe_prob), 4),
+                "safety_level": safety_level,
+                "color": color,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": geojson_geom["coordinates"]
+                }
+            }
+            grid_data_list.append(grid_data)
+        
+        logger.info(
+            f"Heatmap complete: Safe={safe_count}, Low Risk={low_risk_count}, "
+            f"Medium={medium_risk_count}, High={high_risk_count}, "
+            f"Avg Unsafe Probability={avg_unsafe_probability:.4f}"
+        )
+        
+        # =====================
+        # STEP 7: Return structured response
+        # =====================
+        return {
+            "timestamp": dt.isoformat(),
+            "statistics": {
+                "total_grids": len(grid_ids),
+                "safe_count": safe_count,
+                "low_risk_count": low_risk_count,
+                "medium_risk_count": medium_risk_count,
+                "high_risk_count": high_risk_count,
+                "average_unsafe_probability": round(avg_unsafe_probability, 4)
+            },
+            "grids": grid_data_list
+        }
+
+
+# Create global predictor instance
+predictor = ModelPredictor()
 
 
 # Create global predictor instance

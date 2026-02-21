@@ -18,7 +18,10 @@ from app.models import (
     BatchPredictionResponse,
     HealthResponse,
     LocationPredictionRequest,
-    LocationPredictionResponse
+    LocationPredictionResponse,
+    RoutePredictionRequest,
+    RoutePredictionResponse,
+    HeatmapResponse
 )
 from app.predictor import predictor
 from app.geo_utils import grid_mapper
@@ -423,6 +426,204 @@ async def predict_from_location(request: LocationPredictionRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Prediction failed: {str(e)}"
+        )
+
+
+@app.post(
+    f"{settings.api_prefix}/predict/route",
+    response_model=RoutePredictionResponse,
+    summary="Route safety prediction",
+    tags=["Prediction"],
+    status_code=status.HTTP_200_OK
+)
+async def predict_route(request: RoutePredictionRequest):
+    """
+    Predict safety score for a complete route/path
+    
+    Takes an array of coordinates representing a path from source to destination.
+    Preprocesses each location, runs model predictions for all points, and returns
+    aggregated route safety metrics using both average and worst-case methods.
+    
+    ### Input:
+    - **coordinates**: Array of {lat, lng} coordinate objects (min 2, max 500)
+    - **datetime**: ISO format datetime (YYYY-MM-DDTHH:MM:SS)
+    
+    ### Backend Pipeline:
+    1. Convert all lat/lng → grid IDs
+    2. Extract temporal features from datetime
+    3. Prepare historical lag features
+    4. Run batch predictions on all locations
+    5. Aggregate using average and worst-case methods
+    
+    ### Returns:
+    - **route_safety_score**: Average safety score (0.0-1.0)
+    - **route_safety_level**: Human-readable level (Low/Medium/High Risk)
+    - **worst_probability**: Worst-case (max) safety score
+    - **average_probability**: Average safety score
+    - **segment_count**: Total locations evaluated
+    - **unsafe_segments**: Number of locations predicted as unsafe
+    """
+    try:
+        # Validate model and grids are loaded
+        if not predictor.is_loaded:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Model not loaded. Please try again later."
+            )
+        
+        if not grid_mapper.is_loaded:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Grid mapper not loaded. Service unavailable."
+            )
+        
+        # Parse datetime
+        try:
+            dt = parse_datetime_string(request.datetime)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid datetime format: {str(e)}"
+            )
+        
+        # Convert coordinates list to tuples (lat, lng)
+        coordinates = [(coord.lat, coord.lng) for coord in request.coordinates]
+        
+        # Validate coordinates are within bounds
+        for idx, (lat, lng) in enumerate(coordinates):
+            if not grid_mapper.validate_coordinates(lat, lng):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Coordinate {idx} ({lat}, {lng}) is outside service area bounds"
+                )
+        
+        logger.info(
+            f"Route prediction requested: {len(coordinates)} coordinates, "
+            f"datetime={request.datetime}"
+        )
+        
+        # Run route prediction
+        result = predictor.predict_route(coordinates, dt, grid_mapper)
+        
+        # Create and return response
+        response = RoutePredictionResponse(
+            route_safety_score=result['route_safety_score'],
+            route_safety_level=result['route_safety_level'],
+            worst_probability=result['worst_probability'],
+            average_probability=result['average_probability'],
+            segment_count=result['segment_count'],
+            unsafe_segments=result['unsafe_segments']
+        )
+        
+        logger.info(
+            f"Route prediction complete: avg={result['average_probability']:.4f}, "
+            f"worst={result['worst_probability']:.4f}, "
+            f"unsafe_segments={result['unsafe_segments']}/{result['segment_count']}"
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Route prediction error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Route prediction failed: {str(e)}"
+        )
+
+
+@app.get(
+    f"{settings.api_prefix}/heatmap",
+    response_model=HeatmapResponse,
+    summary="Crime safety heatmap",
+    tags=["Visualization"],
+    status_code=status.HTTP_200_OK
+)
+async def get_heatmap():
+    """
+    Get complete crime safety heatmap for all grid cells
+    
+    Returns safety predictions for all grid cells in the city as a GeoJSON-compatible
+    response with color-coded safety levels. This can be rendered as a heatmap overlay
+    on a web map.
+    
+    ### Backend Process:
+    1. Predicts safety score for all 1041 grid cells
+    2. Uses current datetime for temporal features
+    3. Groups grids by risk level (Low/Medium/High)
+    4. Assigns colors: Green/Yellow/Red
+    5. Returns with polygon geometries for each cell
+    
+    ### Response includes:
+    - **timestamp**: When heatmap was generated
+    - **statistics**: Summary of safe/medium/high risk grids
+    - **grids**: Array of all grids with safety scores and geometries
+    
+    ### Frontend Usage:
+    ```javascript
+    fetch('/api/heatmap')
+      .then(res => res.json())
+      .then(data => {
+        // Render polygons using Leaflet/Mapbox
+        data.grids.forEach(grid => {
+          L.geoJSON(grid.geometry, {
+            style: { color: grid.color }
+          }).addTo(map);
+        });
+      });
+    ```
+    """
+    try:
+        # Validate model and grids are loaded
+        if not predictor.is_loaded:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Model not loaded. Please try again later."
+            )
+        
+        if not grid_mapper.is_loaded:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Grid mapper not loaded. Service unavailable."
+            )
+        
+        logger.info("Heatmap request received")
+        
+        # Run heatmap prediction for all grids
+        result = predictor.predict_all_grids(grid_mapper)
+        
+        # Create response object
+        response = HeatmapResponse(
+            timestamp=result['timestamp'],
+            statistics={
+                "total_grids": result['statistics']['total_grids'],
+                "safe_count": result['statistics']['safe_count'],
+                "low_risk_count": result['statistics']['low_risk_count'],
+                "medium_risk_count": result['statistics']['medium_risk_count'],
+                "high_risk_count": result['statistics']['high_risk_count'],
+                "average_unsafe_probability": result['statistics']['average_unsafe_probability']
+            },
+            grids=result['grids']
+        )
+        
+        logger.info(
+            f"Heatmap complete: {result['statistics']['total_grids']} grids, "
+            f"Safe={result['statistics']['safe_count']}, "
+            f"Low Risk={result['statistics']['low_risk_count']}, "
+            f"Medium={result['statistics']['medium_risk_count']}, "
+            f"High={result['statistics']['high_risk_count']}"
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Heatmap generation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Heatmap generation failed: {str(e)}"
         )
 
 

@@ -266,3 +266,214 @@ class LocationPredictionResponse(BaseModel):
                 }
             }
         }
+
+# ============================================
+# Route Safety Score Prediction Models
+# ============================================
+
+class RouteCoordinate(BaseModel):
+    """Single coordinate in a route"""
+    lat: float = Field(
+        ...,
+        description="Latitude coordinate",
+        ge=-90.0,
+        le=90.0,
+        alias="latitude"
+    )
+    lng: float = Field(
+        ...,
+        description="Longitude coordinate",
+        ge=-180.0,
+        le=180.0,
+        alias="longitude"
+    )
+    
+    class Config:
+        populate_by_name = True  # Allow both lat/latitude and lng/longitude
+
+
+class RoutePredictionRequest(BaseModel):
+    """
+    Route safety prediction request
+    
+    Takes array of coordinates representing path from source to destination.
+    Preprocesses each location, runs model predictions, and returns aggregated route safety.
+    """
+    
+    coordinates: list[RouteCoordinate] = Field(
+        ...,
+        description="Array of coordinates representing the route path",
+        min_length=2,
+        max_length=500
+    )
+    datetime: str = Field(
+        ...,
+        description="ISO format datetime (YYYY-MM-DDTHH:MM:SS)",
+        json_schema_extra={"example": "2026-02-20T14:30:00"}
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "coordinates": [
+                    {"lat": 37.7749, "lng": -122.4194},
+                    {"lat": 37.7750, "lng": -122.4195},
+                    {"lat": 37.7751, "lng": -122.4196}
+                ],
+                "datetime": "2026-02-20T14:30:00"
+            }
+        }
+
+
+class RoutePredictionResponse(BaseModel):
+    """
+    Route safety prediction response
+    
+    Returns aggregated safety score for entire route path using both
+    average and worst-case aggregation methods.
+    """
+    
+    # Overall route metrics (using average of all segment probabilities)
+    route_safety_score: float = Field(
+        ...,
+        description="Average safety score across all route segments (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    route_safety_level: str = Field(
+        ...,
+        description="Human-readable safety level (Low Risk/Medium Risk/High Risk)"
+    )
+    
+    # Worst case metric
+    worst_probability: float = Field(
+        ...,
+        description="Maximum (worst-case) unsafe probability in route (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    
+    # Average metric
+    average_probability: float = Field(
+        ...,
+        description="Average unsafe probability across all segments (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    
+    # Summary
+    segment_count: int = Field(
+        ...,
+        description="Total number of segments evaluated"
+    )
+    unsafe_segments: int = Field(
+        ...,
+        description="Number of segments predicted as unsafe"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "route_safety_score": 0.65,
+                "route_safety_level": "Medium Risk",
+                "worst_probability": 0.82,
+                "average_probability": 0.65,
+                "segment_count": 3,
+                "unsafe_segments": 1
+            }
+        }
+
+
+# ============================================
+# Heatmap API Models
+# ============================================
+
+class GridGeometry(BaseModel):
+    """GeoJSON-compatible polygon geometry for a grid cell"""
+    type: str = Field(default="Polygon", description="Geometry type")
+    coordinates: list = Field(..., description="Polygon coordinates in [[lon, lat], ...] format")
+
+
+class HeatmapGridData(BaseModel):
+    """Single grid cell data for heatmap visualization"""
+    
+    grid_id: int = Field(..., description="Unique grid cell identifier")
+    unsafe_probability: float = Field(
+        ...,
+        description="Probability of being unsafe (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    safety_level: str = Field(
+        ...,
+        description="Safety level: Safe(0), Low Risk(0-0.4), Medium Risk(0.4-0.7), High Risk(0.7-1.0)"
+    )
+    color: str = Field(
+        ...,
+        description="Hex color code (#RRGGBB) for map visualization"
+    )
+    geometry: GridGeometry = Field(..., description="GeoJSON polygon geometry")
+
+
+class HeatmapStatistics(BaseModel):
+    """Overall statistics for heatmap"""
+    
+    total_grids: int = Field(..., description="Total number of grid cells")
+    safe_count: int = Field(..., description="Number of safe grids")
+    low_risk_count: int = Field(..., description="Number of low risk grids")
+    medium_risk_count: int = Field(..., description="Number of medium risk grids")
+    high_risk_count: int = Field(..., description="Number of high risk grids")
+    average_unsafe_probability: float = Field(
+        ...,
+        description="Average unsafe probability across all grids",
+        ge=0.0,
+        le=1.0
+    )
+
+
+class HeatmapResponse(BaseModel):
+    """
+    Complete heatmap response for visualization
+    
+    Returns all grid cells with safety scores, colors, and geometries for map rendering
+    """
+    
+    timestamp: str = Field(
+        ...,
+        description="ISO format datetime when heatmap was generated"
+    )
+    statistics: HeatmapStatistics = Field(
+        ...,
+        description="Overall statistics for the heatmap"
+    )
+    grids: list[HeatmapGridData] = Field(
+        ...,
+        description="Array of grid cells with safety data and geometries"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "timestamp": "2026-02-20T14:30:00",
+                "statistics": {
+                    "total_grids": 1041,
+                    "safe_count": 500,
+                    "low_risk_count": 300,
+                    "medium_risk_count": 150,
+                    "high_risk_count": 91,
+                    "average_unsafe_probability": 0.35
+                },
+                "grids": [
+                    {
+                        "grid_id": 0,
+                        "unsafe_probability": 0.25,
+                        "safety_level": "Low Risk",
+                        "color": "#FFA500",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[-122.5, 37.7], [-122.5, 37.75], [-122.45, 37.75], [-122.45, 37.7], [-122.5, 37.7]]]
+                        }
+                    }
+                ]
+            }
+        }
