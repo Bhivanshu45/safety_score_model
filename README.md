@@ -343,14 +343,6 @@ Key dependencies:
 - scikit-learn: ML utilities
 - joblib: Model persistence
 
-## 📄 License
-
-[Add your license information]
-
-## 👥 Contact
-
-[Add your contact information]
-
 ---
 
 **Built with FastAPI & XGBoost** 🚀
